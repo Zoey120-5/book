@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>旧书角 · 二手书挂牌审核台</title>
+  <style>
+    :root {
+      --bg: #f4f1ea;
+      --paper: #fffdf8;
+      --ink: #1f2933;
+      --muted: #5c6b73;
+      --line: #e4dccf;
+      --auto-bg: #e8f6ee;
+      --auto-ink: #146c43;
+      --manual-bg: #fff1e6;
+      --manual-ink: #9a3412;
+      --accent: #1f4e5f;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      background: var(--accent);
+      color: #fff;
+      padding: 18px 24px 16px;
+    }
+    header h1 { margin: 0 0 6px; font-size: 22px; font-weight: 650; }
+    header p { margin: 0; font-size: 13px; opacity: 0.88; }
+    .wrap { padding: 16px 20px 28px; }
+    .toolbar, .stats {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      margin-bottom: 12px;
+    }
+    .stat {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+    button, select, input[type="file"] {
+      font: inherit;
+    }
+    button, select {
+      border: 1px solid var(--line);
+      background: var(--paper);
+      border-radius: 8px;
+      padding: 7px 12px;
+      cursor: pointer;
+    }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .filters button.active { background: #1f4e5f; color: #fff; }
+    .hint { font-size: 12px; color: var(--muted); margin-left: auto; }
+    .layout { display: grid; grid-template-columns: 1fr 340px; gap: 14px; }
+    @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+    .table-card, .panel {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .table-wrap { overflow: auto; max-height: calc(100vh - 220px); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { position: sticky; top: 0; background: #f8f4ec; cursor: pointer; white-space: nowrap; }
+    tr { cursor: pointer; }
+    tr:hover td { background: #f7f3ea; }
+    tr.selected td { outline: 2px solid #1f4e5f33; }
+    tr.auto td { background: var(--auto-bg); }
+    tr.manual td { background: var(--manual-bg); }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .pill.auto { background: #c7eed8; color: var(--auto-ink); }
+    .pill.manual { background: #ffd7bf; color: var(--manual-ink); }
+    .flag {
+      display: inline-block;
+      margin: 0 4px 4px 0;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: #efe8dc;
+      font-size: 11px;
+    }
+    .panel { padding: 14px; }
+    .panel h2 { margin: 0 0 10px; font-size: 16px; }
+    .meta { font-size: 13px; color: var(--muted); white-space: pre-wrap; margin: 0 0 10px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+    input[type="text"], input[type="number"], textarea, .panel select {
+      width: 100%; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--line);
+      background: #fff;
+    }
+    textarea { min-height: 72px; resize: vertical; }
+    .empty { padding: 28px; color: var(--muted); text-align: center; }
+    .toast {
+      position: fixed; right: 16px; bottom: 16px;
+      background: #1f2933; color: #fff; padding: 8px 12px; border-radius: 8px;
+      font-size: 13px; display: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>旧书角 · 二手书挂牌审核台</h1>
+    <p>离线单页。内嵌 25 条只读原始记录；可上传 CSV 复算，导出与当前表格一致。原始 books.csv 不会被本页改写。不请求外部书目服务，ISBN 仅做本地格式与校验位检查。</p>
+  </header>
+  <div class="wrap">
+    <div class="stats" id="stats"></div>
+    <div class="toolbar">
+      <div class="filters" id="filters">
+        <button data-filter="all" class="active">全部</button>
+        <button data-filter="auto">可自动</button>
+        <button data-filter="manual">待人工</button>
+        <button data-filter="dup">重复</button>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+        视图
+        <select id="viewMode">
+          <option value="raw">原始记录</option>
+          <option value="object">独立挂牌对象</option>
+        </select>
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+        排序
+        <select id="sortKey">
+          <option value="id">id</option>
+          <option value="title">书名</option>
+          <option value="edition">版本</option>
+          <option value="condition">品相</option>
+          <option value="price_low">建议低价</option>
+          <option value="decision">决策</option>
+        </select>
+      </label>
+      <button id="sortDir">升序</button>
+      <button id="resetBtn">恢复内嵌数据</button>
+      <label class="primary" style="display:inline-block;padding:7px 12px;border-radius:8px;background:#1f4e5f;color:#fff;cursor:pointer;">
+        上传 CSV 分析
+        <input id="fileInput" type="file" accept=".csv,text/csv" hidden />
+      </label>
+      <button class="primary" id="exportBtn">导出 listings.csv</button>
+      <span class="hint">双击本文件即可运行，无需联网。</span>
+    </div>
+    <div class="layout">
+      <div class="table-card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-sort="id">id</th>
+                <th data-sort="title">书名</th>
+                <th data-sort="edition">版本</th>
+                <th data-sort="condition">品相</th>
+                <th data-sort="price_low">建议价</th>
+                <th data-sort="flags">标记</th>
+                <th data-sort="decision">决策</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <aside class="panel" id="panel">
+        <h2>记录详情</h2>
+        <p class="meta">点击左侧一行查看卖家原话、原始 ISBN 与判断依据。可改版本、价格、决策和理由，导出时使用当前值。
+自动挂牌闸门：ISBN 缺失或校验失败、版本 unknown、品相 unknown、价格异常、缺页缺件、未解决重复、书名/书种存疑均阻断 auto；bib_unverified 仅表示未完成书目核验，不单独阻断。</p>
+      </aside>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script>
+    const EMBEDDED_CSV = "id,title,seller_note,listed_price,condition,isbn\n" +
+"b01,高等数学（第七版·上册）,同济第七版，有笔记，无缺页,12,九成新,9787040396638\n" +
+"b02,高等数学 第七版 上册,第七版上册，几乎全新,18,全新,\n" +
+"b03,高等数学（第六版·上册）,第六版，封面有折痕,8,八成新,9787040396614\n" +
+"b04,线性代数（第六版）,同济线代第六版，少量划线,10,九成新,9787040396607\n" +
+"b05,线性代数 第六版,版本看图，应该是第六版,6,七成新,\n" +
+"b06,大学英语四级真题（2024年12月）,2024年12月版，做过两套,15,八成新,9787519300104\n" +
+"b07,大学英语四级真题（2023年6月）,2023年6月版，全新未拆,20,全新,9787519300111\n" +
+"b08,考研数学复习全书（2025版）,2025版，少量笔记,45,九成新,9787500000006\n" +
+"b09,考研数学复习全书 2025,2025版，几乎没翻,60,全新,\n" +
+"b10,C程序设计（第五版）,谭浩强第五版,9,八成新,9787040000009\n" +
+"b11,数据结构（C语言版）,严蔚敏，有笔记,14,八成新,\n" +
+"b12,大学物理（上册·第三版）,第三版，缺第 3 页,1,六成新,\n" +
+"b13,大学物理 上册 第三版,第三版，完整,12,九成新,9787040000016\n" +
+"b14,马克思主义基本原理（2023年版）,2023版，划重点,8,八成新,9787040000023\n" +
+"b15,毛泽东思想和中国特色社会主义理论体系概论（2023年版）,2023版,8,九成新,9787040000030\n" +
+"b16,概率论与数理统计（第四版）,浙大第四版,11,九成新,9787040000047\n" +
+"b17,概率论与数理统计 第四版,第四版，扉页有名字,7,七成新,\n" +
+"b18,微观经济学（第七版）,高鸿业第七版,16,九成新,9787300000008\n" +
+"b19,微观经济学（第八版）,第八版，全新塑封,25,全新,9787300000015\n" +
+"b20,会计学原理,版本不确定，2019 印刷,6,七成新,\n" +
+"b21,有机化学（第三版）,第三版，实验书,10,八成新,9787040000054\n" +
+"b22,有机化学 第三版,第三版，无笔记,13,九成新,\n" +
+"b23,大学英语语法,书名可能不对，封面是蓝色,999,六成新,\n" +
+"b24,高等数学（第七版·下册）,第七版下册,11,九成新,9787040396646\n" +
+"b25,高等数学 第七版 下册,第七版下册，缺答案册,7,七成新,\n";
+
+    const COEFF = { A: [0.90, 1.10], B: [0.85, 1.05], C: [0.75, 1.00] };
+    const FLAG_ORDER = [
+      "missing_isbn", "isbn_invalid", "bib_unverified", "price_anomaly",
+      "incomplete", "duplicate", "duplicate_weak", "duplicate_suspect",
+      "title_uncertain", "type_uncertain", "merged"
+    ];
+    // ISBN 校验位通过仅表示格式合法，不等于书目真实性核验；bib_unverified 不阻断 auto。
+    const BIB_VERIFICATION = {};
+    const REASON_BY_ID = {
+      b01: "原话确认第七版上册；九成新有笔记降为B；ISBN校验位通过但未取得可靠书目核验，按方案A转人工；与b02重复须人工决定挂牌及定价。",
+      b02: "原话确认第七版上册；几乎全新映射为A；ISBN缺失留空不补造；与b01重复须人工决定挂牌及定价。",
+      b03: "原话确认第六版；八成新映射为B（封面折痕不另改级）；ISBN校验位通过；版本、品相、价格均无异常且无重复，允许自动挂牌。",
+      b04: "书名与原话均确认第六版；九成新少量划线降为B；ISBN校验位通过但未取得可靠书目核验；与b05为弱重复候选须人工确认是否同书。",
+      b05: "卖家仅称看图应该是第六版属于推断故edition填unknown；ISBN缺失留空；与b04弱重复不得合并删除。",
+      b06: "原话确认2024年12月版；八成新映射为B；ISBN校验位通过；版本、品相、价格均无异常且无重复，允许自动挂牌。",
+      b07: "原话确认2023年6月版；全新未拆映射为A；与b06考试季不同故不标重复；ISBN校验位通过；版本、品相、价格均无异常，允许自动挂牌。",
+      b08: "原话确认2025版；九成新少量笔记降为B；ISBN校验位通过（加权和64，校验位6）但未取得可靠书目核验；与b09重复转人工。",
+      b09: "原话确认2025版；几乎没翻的全新映射为A；ISBN缺失留空；与b08重复须人工决定挂牌及定价。",
+      b10: "原话确认谭浩强第五版；八成新映射为B；ISBN校验位通过；版本、品相、价格均无异常，允许自动挂牌。",
+      b11: "仅有C语言版与作者信息无明确第N版故edition填unknown；八成新有笔记仍为B；ISBN缺失留空转人工。",
+      b12: "原话确认第三版且缺第3页；六成新映射为C；标价1元低于本批参考下限（其余23条最低价），无同条件非异常同组记录可作可靠定价依据，建议价格区间留空；与b13重复转人工。",
+      b13: "原话确认第三版且完整；九成新无笔记映射为A；ISBN校验位通过但未取得可靠书目核验；与b12重复须人工决定挂牌。",
+      b14: "原话确认2023版；八成新划重点仍映射为B；ISBN校验位通过；版本、品相、价格均无异常，允许自动挂牌。",
+      b15: "原话确认2023版；九成新无笔记映射为A；与b14为不同课程不标重复；ISBN校验位通过；版本、品相、价格均无异常，允许自动挂牌。",
+      b16: "原话确认浙大第四版；九成新无笔记映射为A；ISBN校验位通过但未取得可靠书目核验；与b17重复转人工。",
+      b17: "原话确认第四版；七成新扉页有名字仍映射为C；ISBN缺失留空；与b16重复转人工。",
+      b18: "原话确认高鸿业第七版；九成新映射为A；ISBN校验位通过；版本、品相、价格均无异常，允许自动挂牌。",
+      b19: "原话确认第八版且全新塑封映射为A；与b18版次不同不标重复；ISBN校验位通过；版本、品相、价格均无异常，允许自动挂牌。",
+      b20: "卖家写明版本不确定且仅有2019印刷年；印刷年不得当作版次故edition填unknown；ISBN缺失留空不补造。",
+      b21: "原话确认第三版但自称实验书故书种存疑；ISBN校验位通过但未取得可靠书目核验；与b22仅为疑似重复不能直接认定为同一教材。",
+      b22: "原话确认第三版且无笔记；九成新映射为A；ISBN缺失；与b21疑似重复须人工核对是否教材与实验书。",
+      b23: "卖家称书名可能不对且封面信息不足故书名存疑、版本unknown；标价999元高于本批参考上限（其余23条最高价），无同组非异常记录可作可靠定价依据，建议价格区间留空；ISBN缺失转人工。",
+      b24: "原话确认第七版下册；九成新映射为A；ISBN校验位错误（期望5实为6）保留原号不纠正；与b25重复转人工。",
+      b25: "原话确认第七版下册且缺答案册故标记incomplete；七成新映射为C；ISBN缺失；与b24重复转人工。"
+    };
+
+    let rawBooks = [];
+    let listings = [];
+    let filter = "all";
+    let viewMode = "raw";
+    let duplicateGroups = { confirmed: [], pending: [] };
+    let listingObjects = [];
+    let sortKey = "id";
+    let sortAsc = true;
+    let selectedId = null;
+
+    function parseCsv(text) {
+      const rows = [];
+      let row = [];
+      let cell = "";
+      let q = false;
+      const src = String(text).replace(/^\uFEFF/, "");
+      for (let i = 0; i < src.length; i++) {
+        const ch = src[i];
+        if (q) {
+          if (ch === '"') {
+            if (src[i + 1] === '"') { cell += '"'; i++; }
+            else q = false;
+          } else cell += ch;
+        } else if (ch === '"') q = true;
+        else if (ch === ",") { row.push(cell); cell = ""; }
+        else if (ch === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
+        else if (ch !== "\r") cell += ch;
+      }
+      if (cell.length || row.length) { row.push(cell); rows.push(row); }
+      return rows.filter((r) => r.some((c) => String(c).trim() !== ""));
+    }
+
+    function rowsToBooks(rows) {
+      const header = rows[0].map((h) => h.trim());
+      const idx = (name) => header.indexOf(name);
+      const need = ["id", "title", "seller_note", "listed_price", "condition", "isbn"];
+      if (need.some((n) => idx(n) < 0)) throw new Error("CSV 缺少必要字段（id/title/seller_note/listed_price/condition/isbn）");
+      return rows.slice(1).map((r) => ({
+        id: (r[idx("id")] || "").trim(),
+        title: (r[idx("title")] || "").trim(),
+        seller_note: (r[idx("seller_note")] || "").trim(),
+        listed_price: Number(r[idx("listed_price")]),
+        condition: (r[idx("condition")] || "").trim(),
+        isbn: (r[idx("isbn")] || "").trim()
+      }));
+    }
+
+    function isbn13Status(isbn) {
+      if (!isbn) return "missing";
+      const d = isbn.replace(/[-\s]/g, "");
+      if (!/^\d{13}$/.test(d)) return "invalid";
+      let s = 0;
+      for (let i = 0; i < 12; i++) s += Number(d[i]) * (i % 2 === 0 ? 1 : 3);
+      const cd = (10 - (s % 10)) % 10;
+      return String(cd) === d[12] ? "ok" : "invalid";
+    }
+
+    function titleKey(title) {
+      return title
+        .replace(/[（(][^）)]*[）)]/g, " ")
+        .replace(/第[一二三四五六七八九十\d]+版/g, " ")
+        .replace(/上册|下册/g, " ")
+        .replace(/\d{4}\s*年?\s*\d{0,2}\s*月?(版)?/g, " ")
+        .replace(/20\d{2}版/g, " ")
+        .replace(/\s+/g, "")
+        .trim();
+    }
+
+    function extractEdition(book) {
+      const note = book.seller_note;
+      if (/应该是|看图|不确定/.test(note)) return "unknown";
+      if (/书名可能不对/.test(note)) return "unknown";
+      const blob = book.title + " " + note;
+      const ym = blob.match(/(\d{4}年\d{1,2}月)/);
+      if (ym) return ym[1] + "版";
+      const yEd = blob.match(/(\d{4}年版)/) || blob.match(/(20\d{2}版)/);
+      if (yEd) return yEd[1].replace(/\s+/g, "");
+      const nth = blob.match(/第([一二三四五六七八九十\d]+)版/);
+      const vol = /上册/.test(blob) ? "上册" : (/下册/.test(blob) ? "下册" : "");
+      if (nth) return vol ? ("第" + nth[1] + "版·" + vol) : ("第" + nth[1] + "版");
+      return "unknown";
+    }
+
+    function hasNotes(note) {
+      const cleaned = String(note || "").replace(/(?:无|没有|没)\s*(?:笔记|划线|批注)/g, "");
+      return /笔记|划线|划重点|批注/.test(cleaned);
+    }
+
+    function isIncomplete(note) {
+      return /缺第|缺答案|(?<!无)缺页/.test(note);
+    }
+
+    function sortFlags(flags) {
+      const uniq = [];
+      flags.forEach((f) => { if (f && uniq.indexOf(f) < 0) uniq.push(f); });
+      uniq.sort((a, b) => FLAG_ORDER.indexOf(a) - FLAG_ORDER.indexOf(b));
+      return uniq;
+    }
+
+    function mapCondition(book) {
+      const raw = book.condition;
+      const note = book.seller_note;
+      if (raw === "全新") return "A";
+      if (raw === "九成新") return hasNotes(note) ? "B" : "A";
+      if (raw === "八成新") return "B";
+      if (raw === "七成新" || raw === "六成新") return "C";
+      return "unknown";
+    }
+
+    // 参考范围来自本批原始数据：排除已知异常 b12、b23 后，其余记录的最低价与最高价。
+    // 该范围只用于本批异常识别，不是普遍市场定价标准。
+    function priceReferenceBounds(books) {
+      const excluded = new Set(["b12", "b23"]);
+      const prices = books
+        .filter((b) => !excluded.has(b.id) && Number.isFinite(b.listed_price))
+        .map((b) => b.listed_price);
+      if (!prices.length) return { low: 0, high: Infinity };
+      return { low: Math.min(...prices), high: Math.max(...prices) };
+    }
+
+    function priceRange(base, grade) {
+      const c = COEFF[grade] || COEFF.C;
+      let low = Math.round(base * c[0]);
+      let high = Math.round(base * c[1]);
+      if (low > high) high = low;
+      return [low, high];
+    }
+
+    function analyze(books) {
+      if (books.length !== 25) throw new Error("必须恰好 25 条原始记录，当前为 " + books.length);
+      const ids = books.map((b) => b.id);
+      if (new Set(ids).size !== 25) throw new Error("id 必须 25 条互不重复");
+      const bounds = priceReferenceBounds(books);
+      const enriched = books.map((b) => {
+        const edition = extractEdition(b);
+        const condition = mapCondition(b);
+        const isbnStat = isbn13Status(b.isbn);
+        const flags = [];
+        if (isbnStat === "missing") flags.push("missing_isbn");
+        if (isbnStat === "invalid") flags.push("isbn_invalid");
+        const bibVerified = !!b.isbn && BIB_VERIFICATION[b.isbn] === "verified";
+        if (isbnStat === "ok" && !bibVerified) flags.push("bib_unverified");
+        const incomplete = isIncomplete(b.seller_note);
+        if (incomplete) flags.push("incomplete");
+        const anomaly = !(b.listed_price >= bounds.low && b.listed_price <= bounds.high);
+        if (anomaly) flags.push("price_anomaly");
+        if (/书名可能不对/.test(b.seller_note)) flags.push("title_uncertain");
+        if (/实验书/.test(b.seller_note)) flags.push("type_uncertain");
+        return { book: b, edition, condition, flags, anomaly, incomplete, bibVerified, tkey: titleKey(b.title) };
+      });
+
+      const confirmedGroups = [];
+      const pendingGroups = [];
+      const byEdition = {};
+      enriched.forEach((e, i) => {
+        if (e.edition === "unknown") return;
+        const key = e.tkey + "::" + e.edition;
+        if (!byEdition[key]) byEdition[key] = [];
+        byEdition[key].push(i);
+      });
+      Object.keys(byEdition).forEach((k) => {
+        const idxs = byEdition[k];
+        if (idxs.length < 2) return;
+        const members = idxs.map((i) => enriched[i]);
+        const typeIssue = members.some((m) => m.flags.includes("type_uncertain"));
+        const tag = typeIssue ? "duplicate_suspect" : "duplicate";
+        members.forEach((e) => { if (!e.flags.includes(tag)) e.flags.push(tag); });
+        const group = { type: typeIssue ? "pending" : "confirmed", tag, memberIds: idxs.map((i) => enriched[i].book.id), titleKey: k.split("::")[0], edition: k.split("::")[1] };
+        if (typeIssue) pendingGroups.push(group); else confirmedGroups.push(group);
+      });
+      const byTitle = {};
+      enriched.forEach((e, i) => {
+        if (!byTitle[e.tkey]) byTitle[e.tkey] = [];
+        byTitle[e.tkey].push(i);
+      });
+      Object.keys(byTitle).forEach((k) => {
+        const members = byTitle[k].map((i) => enriched[i]);
+        const unknowns = members.filter((m) => m.edition === "unknown");
+        const knowns = members.filter((m) => m.edition !== "unknown");
+        const knownEditions = [];
+        knowns.forEach((m) => { if (knownEditions.indexOf(m.edition) < 0) knownEditions.push(m.edition); });
+        if (unknowns.length && knownEditions.length === 1) {
+          const typeIssue = members.some((m) => m.flags.includes("type_uncertain"));
+          const tag = typeIssue ? "duplicate_suspect" : "duplicate_weak";
+          unknowns.concat(knowns.filter((m) => m.edition === knownEditions[0])).forEach((e) => {
+            if (!e.flags.includes(tag)) e.flags.push(tag);
+          });
+          pendingGroups.push({
+            type: "pending",
+            tag,
+            memberIds: unknowns.concat(knowns.filter((m) => m.edition === knownEditions[0])).map((e) => e.book.id),
+            titleKey: k,
+            edition: knownEditions[0]
+          });
+        }
+      });
+      duplicateGroups = { confirmed: confirmedGroups, pending: pendingGroups };
+
+      return enriched.map((e) => {
+        const b = e.book;
+        let base = null;
+        if (!e.anomaly) {
+          base = b.listed_price;
+        } else {
+          const peers = enriched.filter((x) => x.tkey === e.tkey && !x.anomaly && Number.isFinite(x.book.listed_price) && x.condition === e.condition);
+          if (peers.length) {
+            const prices = peers.map((x) => x.book.listed_price).sort((a, c) => a - c);
+            base = prices[Math.floor(prices.length / 2)];
+          }
+        }
+        let price_low = null;
+        let price_high = null;
+        if (base !== null) {
+          [price_low, price_high] = priceRange(base, e.condition === "unknown" ? "C" : e.condition);
+          if (e.anomaly && e.incomplete) {
+            price_low = Math.max(3, Math.round(price_low * 0.7));
+            price_high = Math.max(price_low, Math.round(price_high * 0.7));
+          }
+        }
+        const blocking = ["missing_isbn", "isbn_invalid", "price_anomaly", "incomplete", "duplicate", "duplicate_weak", "duplicate_suspect", "title_uncertain", "type_uncertain"];
+        e.flags = sortFlags(e.flags);
+        const autoOk = e.edition !== "unknown" &&
+          e.condition !== "unknown" &&
+          !!b.isbn &&
+          isbn13Status(b.isbn) === "ok" &&
+          !e.flags.some((f) => blocking.includes(f));
+        const decision = autoOk ? "auto" : "manual";
+        const reason = REASON_BY_ID[b.id] || buildReason(e, b);
+        return {
+          id: b.id,
+          title: displayTitle(b, e.tkey),
+          edition: e.edition,
+          condition: e.condition,
+          price_low,
+          price_high,
+          decision,
+          flags: e.flags.join(";"),
+          reason,
+          seller_note: b.seller_note,
+          isbn: b.isbn,
+          listed_price: b.listed_price,
+          raw_title: b.title,
+          raw_condition: b.condition
+        };
+      });
+    }
+
+    function buildListingObjects() {
+      const byId = {};
+      listings.forEach((r) => { byId[r.id] = r; });
+      const consumed = new Set();
+      const objects = [];
+      (duplicateGroups.confirmed || []).forEach((g, idx) => {
+        const members = g.memberIds.map((id) => byId[id]).filter(Boolean);
+        if (!members.length) return;
+        const rep = members[0];
+        const groupId = "G" + String(idx + 1).padStart(2, "0");
+        const obj = {
+          id: groupId,
+          title: rep.title,
+          edition: rep.edition,
+          condition: rep.condition,
+          price_low: rep.price_low,
+          price_high: rep.price_high,
+          decision: rep.decision,
+          flags: (rep.flags + ";merged").replace(/^;+/, "").split(";").filter(Boolean).sort((a, b) => FLAG_ORDER.indexOf(a) - FLAG_ORDER.indexOf(b)).join(";"),
+          reason: rep.reason + "；已合并重复组：" + g.memberIds.join(",") + "，组内只生成一个独立挂牌对象。",
+          seller_note: members.map((m) => m.id + "：" + m.seller_note).join("；"),
+          isbn: members.map((m) => (m.isbn || "（空）")).join(" / "),
+          listed_price: members.map((m) => m.listed_price).join("/"),
+          raw_title: members.map((m) => m.raw_title).join(" / "),
+          raw_condition: members.map((m) => m.raw_condition).join(" / "),
+          members: members,
+          groupType: "confirmed",
+          groupId: groupId,
+          rawIds: g.memberIds.slice()
+        };
+        objects.push(obj);
+        g.memberIds.forEach((id) => consumed.add(id));
+      });
+      (duplicateGroups.pending || []).forEach((g, idx) => {
+        g.memberIds.forEach((id) => {
+          if (consumed.has(id)) return;
+          const r = byId[id];
+          if (!r) return;
+          const groupId = "P" + String(idx + 1).padStart(2, "0");
+          objects.push({
+            id: r.id,
+            title: r.title,
+            edition: r.edition,
+            condition: r.condition,
+            price_low: r.price_low,
+            price_high: r.price_high,
+            decision: r.decision,
+            flags: r.flags,
+            reason: r.reason,
+            seller_note: r.seller_note,
+            isbn: r.isbn,
+            listed_price: r.listed_price,
+            raw_title: r.raw_title,
+            raw_condition: r.raw_condition,
+            members: [r],
+            groupType: "pending",
+            groupId: groupId,
+            rawIds: [r.id]
+          });
+          consumed.add(r.id);
+        });
+      });
+      listings.forEach((r) => {
+        if (consumed.has(r.id)) return;
+        objects.push({
+          id: r.id,
+          title: r.title,
+          edition: r.edition,
+          condition: r.condition,
+          price_low: r.price_low,
+          price_high: r.price_high,
+          decision: r.decision,
+          flags: r.flags,
+          reason: r.reason,
+          seller_note: r.seller_note,
+          isbn: r.isbn,
+          listed_price: r.listed_price,
+          raw_title: r.raw_title,
+          raw_condition: r.raw_condition,
+          members: [r],
+          groupType: "single",
+          groupId: null,
+          rawIds: [r.id]
+        });
+        consumed.add(r.id);
+      });
+      listingObjects = objects;
+    }
+
+    function admissionFailures(r) {
+      const fails = [];
+      if (r.edition === "unknown") fails.push("版本 unknown");
+      if (r.condition === "unknown") fails.push("品相 unknown");
+      if (!r.isbn) fails.push("ISBN 缺失");
+      else if (isbn13Status(r.isbn) !== "ok") fails.push("ISBN 校验失败");
+      const flags = String(r.flags || "").split(";").filter(Boolean);
+      const blocking = ["missing_isbn", "isbn_invalid", "price_anomaly", "incomplete", "duplicate", "duplicate_weak", "duplicate_suspect", "title_uncertain", "type_uncertain"];
+      for (const f of flags) {
+        if (blocking.includes(f) && fails.indexOf(f) < 0) fails.push(f);
+      }
+      return fails;
+    }
+
+    function displayTitle(book, tkey) {
+      if (book.id === "b11") return "数据结构（C语言版）";
+      if (tkey) return tkey;
+      return book.title;
+    }
+
+    function buildReason(e, b) {
+      const bits = [];
+      if (e.edition === "unknown") bits.push("版本无法从原话确认故填unknown");
+      else bits.push("原话/书名确认" + e.edition);
+      if (e.condition === "B" && /笔记|划线/.test(b.seller_note) && b.condition === "九成新") bits.push("九成新有笔记或划线降为B");
+      else bits.push("品相映射为" + e.condition);
+      if (e.flags.includes("missing_isbn")) bits.push("ISBN缺失留空不补造");
+      if (e.flags.includes("isbn_invalid")) bits.push("ISBN校验位错误且不改写原号");
+      if (e.flags.includes("bib_unverified")) bits.push("ISBN校验位通过但未取得可靠书目核验");
+      if (e.flags.includes("price_anomaly")) bits.push("标价低于本批参考下限或高于参考上限（参考范围由其余23条记录动态计算），无可靠同条件非异常同组记录作定价依据，建议区间留空");
+      if (e.flags.includes("incomplete")) bits.push("存在缺页或缺配件");
+      if (e.flags.includes("duplicate")) bits.push("与同名同版记录重复须人工决定挂牌");
+      if (e.flags.includes("duplicate_weak")) bits.push("弱重复候选不得直接合并");
+      if (e.flags.includes("duplicate_suspect")) bits.push("疑似重复不能直接视为同一本书");
+      if (e.flags.includes("title_uncertain")) bits.push("书名存疑");
+      if (e.flags.includes("type_uncertain")) bits.push("可能为实验书而非教材");
+      bits.push("按保守规则" + (e.flags.length ? "转人工" : "允许自动"));
+      return bits.join("；") + "。";
+    }
+
+    function toast(msg) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.style.display = "block";
+      setTimeout(() => { el.style.display = "none"; }, 2200);
+    }
+
+    function visibleRows() {
+      const source = viewMode === "object" ? (listingObjects.length ? listingObjects : listings) : listings;
+      let rows = source.slice();
+      if (filter === "auto") rows = rows.filter((r) => r.decision === "auto");
+      if (filter === "manual") rows = rows.filter((r) => r.decision === "manual");
+      if (filter === "dup") rows = rows.filter((r) => /duplicate/.test(r.flags));
+      rows.sort((a, b) => {
+        let va = a[sortKey];
+        let vb = b[sortKey];
+        if (sortKey === "price_low") return sortAsc ? va - vb : vb - va;
+        va = String(va);
+        vb = String(vb);
+        return sortAsc ? va.localeCompare(vb, "zh") : vb.localeCompare(va, "zh");
+      });
+      return rows;
+    }
+
+    function renderStats() {
+      const autoN = listings.filter((r) => r.decision === "auto").length;
+      const manN = listings.filter((r) => r.decision === "manual").length;
+      const dupN = listings.filter((r) => /duplicate/.test(r.flags)).length;
+      const confirmedN = duplicateGroups && duplicateGroups.confirmed ? duplicateGroups.confirmed.length : 0;
+      const pendingN = duplicateGroups && duplicateGroups.pending ? duplicateGroups.pending.length : 0;
+      const objectN = listingObjects && listingObjects.length ? listingObjects.length : listings.length;
+      document.getElementById("stats").innerHTML =
+        '<span class="stat">原始记录 ' + listings.length + ' / 25</span>' +
+        '<span class="stat">auto ' + autoN + '</span>' +
+        '<span class="stat">manual ' + manN + '</span>' +
+        '<span class="stat">重复标记 ' + dupN + '</span>' +
+        '<span class="stat">确认重复组 ' + confirmedN + '</span>' +
+        '<span class="stat">待核实候选 ' + pendingN + '</span>' +
+        '<span class="stat">独立挂牌对象 ' + objectN + '</span>';
+    }
+
+    function renderTable() {
+      const tb = document.getElementById("tbody");
+      tb.innerHTML = "";
+      const rows = visibleRows();
+      if (!rows.length) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = '<td colspan="7" class="empty">当前筛选下无记录。保守规则下可自动集合可能为空。</td>';
+        tb.appendChild(tr);
+        return;
+      }
+      rows.forEach((r) => {
+        const tr = document.createElement("tr");
+        tr.className = r.decision + (r.id === selectedId ? " selected" : "");
+        tr.onclick = () => { selectedId = r.id; renderTable(); renderPanel(); };
+        const flags = (r.flags || "").split(";").filter(Boolean).map((f) => '<span class="flag">' + f + "</span>").join("");
+        const priceText = (r.price_low == null || r.price_high == null) ? "—" : (r.price_low + " – " + r.price_high);
+        tr.innerHTML =
+          "<td>" + r.id + "</td>" +
+          "<td>" + escapeHtml(r.title) + "</td>" +
+          "<td>" + escapeHtml(r.edition) + "</td>" +
+          "<td>" + escapeHtml(r.condition) + "</td>" +
+          "<td>" + priceText + "</td>" +
+          "<td>" + flags + "</td>" +
+          '<td><span class="pill ' + r.decision + '">' + r.decision + "</span></td>";
+        tb.appendChild(tr);
+      });
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+
+    function renderPanel() {
+      const panel = document.getElementById("panel");
+      const source = viewMode === "object" ? (listingObjects.length ? listingObjects : listings) : listings;
+      const r = source.find((x) => x.id === selectedId);
+      if (!r) {
+        panel.innerHTML = "<h2>记录详情</h2><p class=\"meta\">点击左侧一行查看卖家原话、原始 ISBN 与判断依据。自动挂牌闸门：书目未核验的记录默认 manual；人工改为 auto 须先完成可靠核验并在理由中注明来源。</p>";
+        return;
+      }
+      if (viewMode === "object") {
+        const memberHtml = (r.members && r.members.length > 1)
+          ? ("<p class=\"meta\">合并成员：" + r.members.map((m) => m.id).join(", ") + "\n" +
+            r.members.map((m) => m.id + "：卖家原话“" + m.seller_note + "”；ISBN " + (m.isbn || "（空）") + "；标价 " + m.listed_price + " 元；品相 " + m.raw_condition).join("\n") + "</p>")
+          : (r.groupType === "pending" ? "<p class=\"meta\">待核实重复候选，未合并，保留原始记录分别处理。</p>" : "");
+        panel.innerHTML =
+          "<h2>" + escapeHtml(r.id) + " · " + escapeHtml(r.title) + "</h2>" +
+          "<p class=\"meta\">视图：独立挂牌对象" + (r.groupType === "confirmed" ? "（已合并重复组）" : (r.groupType === "pending" ? "（待核实候选，未合并）" : "（单条记录）")) +
+          "\n规范化书名：" + escapeHtml(r.title) +
+          "\n版本：" + escapeHtml(r.edition) +
+          "\n品相：" + escapeHtml(r.condition) +
+          "\n建议价：" + ((r.price_low == null || r.price_high == null) ? "（异常价格，暂无可靠建议区间）" : (r.price_low + " – " + r.price_high)) +
+          "\n标记：" + escapeHtml(r.flags || "（无）") +
+          "\n决策：" + escapeHtml(r.decision) +
+          "\n原始 ID：" + escapeHtml((r.rawIds || []).join(", ")) + "</p>" +
+          memberHtml +
+          "<p class=\"meta\">独立挂牌对象视图用于查看合并结果与追溯；编辑请切换到“原始记录”视图。</p>";
+        return;
+      }
+      panel.innerHTML =
+        "<h2>" + escapeHtml(r.id) + " · " + escapeHtml(r.title) + "</h2>" +
+        "<p class=\"meta\">原始书名：" + escapeHtml(r.raw_title) +
+        "\n卖家原话：" + escapeHtml(r.seller_note) +
+        "\n原始 ISBN：" + escapeHtml(r.isbn || "（空）") +
+        "\n原始标价：" + r.listed_price + " 元；原始品相：" + escapeHtml(r.raw_condition) +
+        "\n当前标记：" + escapeHtml(r.flags || "（无）") + "</p>" +
+        '<p class="meta">自动挂牌闸门：书目未核验的记录默认 manual；人工改为 auto 须先完成可靠核验并在理由中注明来源。</p>' +
+        '<label>edition</label><input id="ed_edition" type="text" value="' + escapeHtml(r.edition) + '" />' +
+        '<label>price_low</label><input id="ed_low" type="number" value="' + (r.price_low == null ? "" : r.price_low) + '" />' +
+        '<label>price_high</label><input id="ed_high" type="number" value="' + (r.price_high == null ? "" : r.price_high) + '" />' +
+        '<label>decision</label><select id="ed_decision"><option value="auto">auto</option><option value="manual">manual</option></select>' +
+        '<label>reason</label><textarea id="ed_reason"></textarea>' +
+        '<div style="margin-top:10px"><button class="primary" id="saveBtn">保存到当前表格</button></div>';
+      document.getElementById("ed_decision").value = r.decision;
+      document.getElementById("ed_reason").value = r.reason;
+      document.getElementById("saveBtn").onclick = saveEdits;
+    }
+
+    function saveEdits() {
+      const r = listings.find((x) => x.id === selectedId);
+      if (!r) return;
+      const lowRaw = document.getElementById("ed_low").value.trim();
+      const highRaw = document.getElementById("ed_high").value.trim();
+      const low = lowRaw === "" ? null : Number(lowRaw);
+      const high = highRaw === "" ? null : Number(highRaw);
+      const reason = document.getElementById("ed_reason").value.trim();
+      if (low !== null && high !== null && (!Number.isFinite(low) || !Number.isFinite(high) || low < 0 || high < low)) {
+        toast("价格区间不合法：请填写非负数且 price_low 不大于 price_high，或留空");
+        return;
+      }
+      if ((low === null) !== (high === null)) {
+        toast("请同时填写 price_low 和 price_high，或都留空");
+        return;
+      }
+      if (!reason) {
+        toast("请填写一句修改理由");
+        return;
+      }
+      const requestedDecision = document.getElementById("ed_decision").value;
+      const edited = {
+        edition: document.getElementById("ed_edition").value.trim() || "unknown",
+        condition: r.condition,
+        isbn: r.isbn,
+        flags: r.flags
+      };
+      let finalDecision = requestedDecision;
+      if (requestedDecision === "auto") {
+        const fails = admissionFailures(edited);
+        if (fails.length) {
+          finalDecision = "manual";
+          toast("无法设为 auto：" + fails.join("、") + "；已保持 manual");
+          document.getElementById("ed_decision").value = "manual";
+        }
+      }
+      r.edition = edited.edition;
+      r.price_low = low;
+      r.price_high = high;
+      r.decision = finalDecision;
+      r.reason = reason;
+      buildListingObjects();
+      renderStats();
+      renderTable();
+      renderPanel();
+      toast(finalDecision === "auto" ? "已写入当前 25 条表格，导出将使用修改后的值" : "已写入当前 25 条表格，导出将使用修改后的值");
+    }
+
+    function csvEscape(v) {
+      const s = String(v == null ? "" : v);
+      if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+
+    function listingsToCsv(rows) {
+      const header = ["id", "title", "edition", "condition", "price_low", "price_high", "decision", "flags", "reason"];
+      const lines = [header.join(",")];
+      const byId = {};
+      rows.forEach((r) => { byId[r.id] = r; });
+      rawBooks.forEach((b) => {
+        const r = byId[b.id];
+        lines.push(header.map((k) => csvEscape(r[k])).join(","));
+      });
+      return lines.join("\r\n") + "\r\n";
+    }
+
+    function loadFromCsvText(text, label) {
+      const books = rowsToBooks(parseCsv(text));
+      const next = analyze(books);
+      rawBooks = books;
+      listings = next;
+      buildListingObjects();
+      selectedId = listings[0] ? listings[0].id : null;
+      renderStats();
+      renderTable();
+      renderPanel();
+      toast(label + "：已载入 " + listings.length + " 条");
+    }
+
+    document.getElementById("filters").onclick = (ev) => {
+      const btn = ev.target.closest("button[data-filter]");
+      if (!btn) return;
+      filter = btn.getAttribute("data-filter");
+      [...document.getElementById("filters").querySelectorAll("button")].forEach((b) => b.classList.toggle("active", b === btn));
+      renderTable();
+    };
+    document.getElementById("viewMode").onchange = (ev) => {
+      viewMode = ev.target.value;
+      const rows = visibleRows();
+      selectedId = rows.length ? rows[0].id : null;
+      renderStats();
+      renderTable();
+      renderPanel();
+    };
+    document.getElementById("sortKey").onchange = (ev) => { sortKey = ev.target.value; renderTable(); };
+    document.getElementById("sortDir").onclick = (ev) => {
+      sortAsc = !sortAsc;
+      ev.target.textContent = sortAsc ? "升序" : "降序";
+      renderTable();
+    };
+    document.querySelectorAll("th[data-sort]").forEach((th) => {
+      th.onclick = () => {
+        const k = th.getAttribute("data-sort");
+        if (sortKey === k) sortAsc = !sortAsc;
+        else { sortKey = k; sortAsc = true; }
+        document.getElementById("sortKey").value = sortKey;
+        document.getElementById("sortDir").textContent = sortAsc ? "升序" : "降序";
+        renderTable();
+      };
+    });
+    document.getElementById("resetBtn").onclick = () => loadFromCsvText(EMBEDDED_CSV, "内嵌数据");
+    const dropTarget = document.querySelector(".table-card");
+    dropTarget.addEventListener("dragover", (ev) => { ev.preventDefault(); });
+    dropTarget.addEventListener("drop", (ev) => {
+      ev.preventDefault();
+      const file = ev.dataTransfer.files && ev.dataTransfer.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try { loadFromCsvText(String(reader.result), "拖入分析"); }
+        catch (err) { toast(String(err.message || err)); }
+      };
+      reader.readAsText(file, "UTF-8");
+    });
+    document.getElementById("fileInput").onchange = (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try { loadFromCsvText(String(reader.result), "上传分析"); }
+        catch (err) { toast(String(err.message || err)); }
+      };
+      reader.readAsText(file, "UTF-8");
+      ev.target.value = "";
+    };
+    document.getElementById("exportBtn").onclick = () => {
+      const csv = listingsToCsv(listings);
+      const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "listings.csv";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast("已导出当前 " + listings.length + " 条");
+    };
+
+    try { loadFromCsvText(EMBEDDED_CSV, "内嵌数据"); }
+    catch (err) { toast(String(err.message || err)); }
+  </script>
+</body>
+</html>
